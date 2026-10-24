@@ -1,44 +1,44 @@
 import { Plugin } from '@/types/plugin';
 import { Filters } from '@libs/filterInputs';
 import { fetchApi } from '@libs/fetch';
-импортировать {загрузить как parseHTML} из «cheerio»;
+import { load as parseHTML } from 'cheerio';
 
 const API =
   'https://api.mystorywave.com/story-wave-backend/api/v1/content';
 
 type ApiResponse<T> = {
-  данные: Т;
+  data: T;
 };
 
 type ApiPage<T> = {
-  список: T[];
-  totalCount?: число;
-  totalPages?: число;
+  list: T[];
+  totalCount?: number;
+  totalPages?: number;
 };
 
-тип Книги = {
+type Book = {
   id: number | string;
-  заголовок?: строка;
+  title?: string;
   authorPseudonym?: string;
   coverImgUrl?: string;
-  краткое содержание?: строка;
+  synopsis?: string;
   genreName?: string;
-  статус?: строка | число;
+  status?: string | number;
 };
 
-тип Глава = {
+type Chapter = {
   id: number | string;
-  заголовок?: строка;
+  title?: string;
   chapterOrder?: number | string;
-  updateTime?: строка;
+  updateTime?: string;
   paywallStatus?: string;
-  уровень?: число | строка;
-  статус?: строка;
-  содержимое?: строка;
+  tier?: number | string;
+  status?: string;
+  content?: string;
 };
 
 function slug(text: string): string {
-  возвращаться (
+  return (
     text.toLowerCase().trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'book'
@@ -46,58 +46,58 @@ function slug(text: string): string {
 }
 
 function escapeHtml(text: string): string {
-  возвратный текст
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, ''');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-// Некоторые API возвращают HTML-код, закодированный как сущности, или в виде буквальных JSON-элементов Unicode.
+// Some APIs return HTML encoded as entities or as literal JSON Unicode escapes.
 function decodeEncodedMarkup(value: string): string {
   const containsEncodedTag =
-    /(?:<|\\u003c)\s*\/?\s*(?:p|div|span|img|br|hr|h[1-6]|figure|section|article)\b/i.test(value);
-  Если (!containsEncodedTag) возвращает значение;
+    /(?:&lt;|\\u003c)\s*\/?\s*(?:p|div|span|img|br|hr|h[1-6]|figure|section|article)\b/i.test(value);
+  if (!containsEncodedTag) return value;
 
-  возвращаемое значение
+  return value
     .replace(/\\\\u003c/gi, '<')
     .replace(/\\\\u003e/gi, '>')
     .replace(/\\u003c/gi, '<')
     .replace(/\\u003e/gi, '>')
-    .replace(/</gi, '<')
-    .replace(/>/gi, '>')
-    .replace(/"/gi, '"')
-    .replace(/'|'/gi, "'");
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
 }
 
 function lastSrcsetUrl(srcset?: string): string | undefined {
   if (!srcset) return undefined;
   const candidates = srcset
-    .расколоть(',')
+    .split(',')
     .map(candidate => candidate.trim().split(/\s+/)[0])
     .filter(Boolean);
-  возвращаем candidates[candidates.length - 1];
+  return candidates[candidates.length - 1];
 }
 
 class BOTITranslation implements Plugin.PluginBase {
   id = 'BOTITranslation';
-  имя = 'BOTI Translation';
+  name = 'BOTI Translation';
   site = 'https://www.botitranslation.com';
-  версия = '1.0.1';
+  version = '1.0.1';
   icon = 'siteNotAvailable.png';
 
-  // LNReader использует эти заголовки при сохранении изображений обложки и глав.
+  // LNReader uses these headers when saving the cover and chapter images.
   imageRequestInit: Plugin.ImageRequestInit = {
-    заголовки: {
-      Реферер: https://www.botitranslation.com/,
+    headers: {
+      Referer: 'https://www.botitranslation.com/',
       Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
     },
   };
 
   private async getJson<T>(url: string): Promise<T> {
     const response = await fetchApi(url, {
-      заголовки: {
+      headers: {
         Accept: 'application/json, text/plain, */*',
         'site-domain': 'www.botitranslation.com',
       },
@@ -114,14 +114,14 @@ class BOTITranslation implements Plugin.PluginBase {
 
   private getId(path: string, type: 'book' | 'chapter'): string {
     const pattern =
-      тип === 'книга'
+      type === 'book'
         ? /\/book\/(\d+)/
-        : /\/глава\/(\d+)/;
+        : /\/chapter\/(\d+)/;
 
     const match = path.match(pattern);
 
-    если (!match) {
-      throw new Error(`Не удается идентифицировать BOTI ${type} ID`);
+    if (!match) {
+      throw new Error(`Cannot identify BOTI ${type} ID`);
     }
 
     return match[1];
@@ -138,7 +138,7 @@ class BOTITranslation implements Plugin.PluginBase {
   private async getChapters(id: string): Promise<Chapter[]> {
     const chapters: Chapter[] = [];
     const pageSize = 100;
-    пусть страница = 1;
+    let page = 1;
     let totalPages = 1;
 
     while (page <= totalPages && page <= 1000) {
@@ -148,12 +148,12 @@ class BOTITranslation implements Plugin.PluginBase {
         `&pageNumber=${page}&pageSize=${pageSize}`;
 
       const response =
-        Ожидайте выполнения this.getJson<ApiResponse<ApiPage<Chapter>>>(url);
+        await this.getJson<ApiResponse<ApiPage<Chapter>>>(url);
 
       const data = response.data;
 
       if (!data || !Array.isArray(data.list)) {
-        throw new Error('Неверный список глав BOTI');
+        throw new Error('Invalid BOTI chapter list');
       }
 
       if (data.list.length === 0) break;
@@ -161,7 +161,7 @@ class BOTITranslation implements Plugin.PluginBase {
       chapters.push(...data.list);
 
       totalPages =
-        Число (данные.общее количество страниц) ||
+        Number(data.totalPages) ||
         Math.max(
           1,
           Math.ceil(
@@ -169,7 +169,7 @@ class BOTITranslation implements Plugin.PluginBase {
           ),
         );
 
-      страница++;
+      page++;
     }
 
     return chapters.filter(chapter => {
@@ -192,31 +192,31 @@ class BOTITranslation implements Plugin.PluginBase {
     const url = value?.trim();
     if (!url) return undefined;
 
-    пытаться {
+    try {
       return new URL(url, this.site).href;
-    } ловить {
-      возвращаемый URL;
+    } catch {
+      return url;
     }
   }
 
   private bookItem(book: Book): Plugin.NovelItem {
     const title = book.title?.trim() || 'Untitled';
 
-    возвращаться {
-      имя: титул,
-      путь: `/book/${book.id}-${slug(title)}`,
-      обложка: this.absoluteUrl(book.coverImgUrl),
+    return {
+      name: title,
+      path: `/book/${book.id}-${slug(title)}`,
+      cover: this.absoluteUrl(book.coverImgUrl),
     };
   }
 
-  асинхронные популярные романы(
-    pageNo: номер,
+  async popularNovels(
+    pageNo: number,
     _options: Plugin.PopularNovelsOptions<Filters>,
   ): Promise<Plugin.NovelItem[]> {
     const page = Math.max(1, Number(pageNo) || 1);
 
     const response =
-      Ожидайте this.getJson<ApiResponse<ApiPage<Book>>>(
+      await this.getJson<ApiResponse<ApiPage<Book>>>(
         `${API}/books?pageNumber=${page}&pageSize=20`,
       );
 
@@ -226,21 +226,21 @@ class BOTITranslation implements Plugin.PluginBase {
   }
 
   async searchNovels(
-    поисковый запрос: строка,
-    pageNo: номер,
+    searchTerm: string,
+    pageNo: number,
   ): Promise<Plugin.NovelItem[]> {
     const query = searchTerm.trim();
 
     if (!query) return [];
 
     const params = new URLSearchParams({
-      ключевое слово: запрос,
+      keyWord: query,
       pageNumber: String(Math.max(1, Number(pageNo) || 1)),
       pageSize: '50',
     });
 
     const response =
-      Ожидайте this.getJson<ApiResponse<ApiPage<Book>>>(
+      await this.getJson<ApiResponse<ApiPage<Book>>>(
         `${API}/books/search?${params.toString()}`,
       );
 
@@ -257,17 +257,17 @@ class BOTITranslation implements Plugin.PluginBase {
       this.getChapters(id),
     ]);
 
-    возвращаться {
+    return {
       ...this.bookItem(book),
-      путь: novelPath,
-      автор: книга.авторПсевдоним || '',
+      path: novelPath,
+      author: book.authorPseudonym || '',
       summary: book.synopsis || '',
-      жанры: книга.название жанра || '',
-      статус: book.status == null ? '' : String(book.status),
+      genres: book.genreName || '',
+      status: book.status == null ? '' : String(book.status),
 
-      главы: chapters.map(chapter => ({
-        имя: chapter.title || 'Глава',
-        путь: `/chapter/${chapter.id}-${slug(
+      chapters: chapters.map(chapter => ({
+        name: chapter.title || 'Chapter',
+        path: `/chapter/${chapter.id}-${slug(
           chapter.title || 'chapter',
         )}`,
         ...(Number.isFinite(Number(chapter.chapterOrder))
@@ -302,17 +302,17 @@ class BOTITranslation implements Plugin.PluginBase {
       let resolvedUrl: string | undefined;
       for (const candidate of candidates) {
         const value = candidate?.trim();
-        если (
-          !значение ||
+        if (
+          !value ||
           /^(?:data:|blob:|javascript:|about:blank)/i.test(value) ||
           /(?:transparent\.gif|spacer\.gif|placeholder\.(?:gif|png)|loading\.gif)/i.test(value)
         ) {
-          продолжать;
+          continue;
         }
 
-        пытаться {
-          resolvedUrl = new URL(value.replace(/&/gi, '&'), this.site).href;
-        } ловить {
+        try {
+          resolvedUrl = new URL(value.replace(/&amp;/gi, '&'), this.site).href;
+        } catch {
           resolvedUrl = value;
         }
         if (resolvedUrl) break;
@@ -324,7 +324,7 @@ class BOTITranslation implements Plugin.PluginBase {
       [
         'srcset',
         'data-src',
-        'оригинальные данные',
+        'data-original',
         'data-lazy-src',
         'data-url',
         'data-image',
@@ -345,18 +345,18 @@ class BOTITranslation implements Plugin.PluginBase {
     const content = decodeEncodedMarkup((chapter.content || '').trim());
     let body = content;
 
-    // BOTI может хранить главу в формате HTML, экранированного HTML или обычного текста.
-    if (!/<[az][^>]*>/i.test(content)) {
-      тело = контент
+    // BOTI may store a chapter as HTML, escaped HTML, or plain text.
+    if (!/<[a-z][^>]*>/i.test(content)) {
+      body = content
         .split(/\r?\n+/)
         .map(line => line.trim())
         .filter(Boolean)
         .map(line => `<p>${escapeHtml(line)}</p>`)
-        .присоединиться('');
+        .join('');
     }
 
-    // LNReader загружает файлы изображений из <img src> при загрузке главы.
-    // Затем экспортер EPUB встраивает загруженные локальные изображения.
+    // LNReader downloads image files from <img src> when a chapter is downloaded.
+    // The EPUB exporter then embeds those downloaded local images.
     body = this.normalizeImageSources(body);
 
     return '<h1>' + escapeHtml(chapter.title || 'Chapter') + '</h1>' + body;
